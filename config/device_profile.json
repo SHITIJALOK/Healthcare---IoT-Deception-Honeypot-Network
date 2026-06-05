@@ -1,0 +1,37 @@
+{
+  "device": {
+    "name": "MediView VX-240 Patient Vitals Monitor",
+    "manufacturer": "MediView Systems",
+    "firmware": "VX240-2.1.7",
+    "serial": "MVX240-DECOY-001",
+    "location": "ICU-NORTH-03",
+    "default_credentials": [
+      {
+        "username": "admin",
+        "password": "admin"
+      },
+      {
+        "username": "root",
+        "password": "toor"
+      },
+      {
+        "username": "service",
+        "password": "service"
+      }
+    ]
+  },
+  "network": {
+    "bind_host": "127.0.0.1",
+    "http_port": 8080,
+    "telnet_port": 2323,
+    "ssh_port": 2222
+  },
+  "alerts": {
+    "internal_networks": [
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16"
+    ],
+    "auto_block_threshold": 5
+  }
+}
