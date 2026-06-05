@@ -6,3 +6,4 @@ logs/uploads/
 dashboards/index.html
 config/firewall_rules.json
 config/firewall_audit.jsonl
+project_details.pdf
