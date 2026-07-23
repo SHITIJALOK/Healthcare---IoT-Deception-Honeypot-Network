@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from common import LOG_DIR, append_jsonl, ensure_dirs, sha256_bytes, utc_now
+from firewall_rules import block
 
 
 def main() -> None:
@@ -25,6 +26,16 @@ def main() -> None:
             "username": "admin",
             "password": "admin",
             "success": False,
+        },
+        {
+            "timestamp": utc_now(),
+            "event_type": "keystroke_capture",
+            "service": "telnet",
+            "source_ip": "198.51.100.19",
+            "source_port": 51244,
+            "stage": "command",
+            "captured_text": "uname -a",
+            "character_count": 8,
         },
         {
             "timestamp": utc_now(),
@@ -58,6 +69,14 @@ def main() -> None:
         },
         {
             "timestamp": utc_now(),
+            "severity": "high",
+            "message": "Internal host touched hidden honeypot",
+            "source_ip": "192.168.10.50",
+            "event_type": "exploit_probe",
+            "service": "http",
+        },
+        {
+            "timestamp": utc_now(),
             "event_type": "payload_upload",
             "service": "http",
             "source_ip": "45.83.64.10",
@@ -76,7 +95,9 @@ def main() -> None:
         },
     ]
     for event in events:
-        append_jsonl(LOG_DIR / "events.jsonl", event)
+        target = "alerts.jsonl" if "severity" in event else "events.jsonl"
+        append_jsonl(LOG_DIR / target, event)
+    block("198.51.100.19", "Sample brute force source for dashboard verification")
     print(f"Wrote {len(events)} sample events to {LOG_DIR / 'events.jsonl'}")
 
 

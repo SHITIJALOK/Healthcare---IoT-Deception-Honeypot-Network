@@ -17,6 +17,7 @@ from common import (
     sha256_bytes,
     utc_now,
 )
+from firewall_rules import block as block_ip, load_rules
 
 
 EVENT_LOG = LOG_DIR / "events.jsonl"
@@ -42,6 +43,65 @@ def log_event(event: dict) -> None:
                 "service": event.get("service"),
             },
         )
+    maybe_auto_block(event, profile)
+
+
+def maybe_auto_block(event: dict, profile: dict) -> None:
+    source_ip = event.get("source_ip", "")
+    if not source_ip:
+        return
+    if event.get("event_type") in {"service_error", "keystroke_capture"}:
+        return
+
+    threshold = int(profile.get("alerts", {}).get("auto_block_threshold", 0))
+    if threshold <= 0:
+        return
+
+    rules = load_rules()
+    if any(rule.get("ip") == source_ip for rule in rules.get("active", [])):
+        return
+
+    suspicious_events = 0
+    for prior_event in load_recent_events():
+        if prior_event.get("source_ip") != source_ip:
+            continue
+        if prior_event.get("event_type") in {"service_error", "keystroke_capture"}:
+            continue
+        suspicious_events += 1
+
+    if suspicious_events < threshold:
+        return
+
+    rule = block_ip(source_ip, f"Auto-block after {suspicious_events} honeypot interactions")
+    append_jsonl(
+        ALERT_LOG,
+        {
+            "timestamp": utc_now(),
+            "severity": "critical",
+            "message": "Automatic simulated firewall block applied",
+            "source_ip": source_ip,
+            "threshold": threshold,
+            "observed_events": suspicious_events,
+            "service": event.get("service"),
+            "rule_id": rule["id"],
+        },
+    )
+
+
+def load_recent_events() -> list[dict]:
+    if not EVENT_LOG.exists():
+        return []
+    events: list[dict] = []
+    with EVENT_LOG.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return events
 
 
 def http_response(status: str, body: str, content_type: str = "text/html") -> bytes:
@@ -166,6 +226,21 @@ async def prompt(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, tex
     return data.decode("utf-8", errors="replace").strip()
 
 
+def log_input_capture(source_ip: str, source_port: int, stage: str, text: str) -> None:
+    log_event(
+        {
+            "timestamp": utc_now(),
+            "event_type": "keystroke_capture",
+            "service": "telnet",
+            "source_ip": source_ip,
+            "source_port": source_port,
+            "stage": stage,
+            "captured_text": text,
+            "character_count": len(text),
+        }
+    )
+
+
 async def handle_telnet(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     peer = writer.get_extra_info("peername") or ("unknown", 0)
     source_ip, source_port = peer[0], peer[1]
@@ -174,7 +249,9 @@ async def handle_telnet(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
     try:
         username = await prompt(reader, writer, "login: ")
+        log_input_capture(source_ip, source_port, "username", username)
         password = await prompt(reader, writer, "password: ")
+        log_input_capture(source_ip, source_port, "password", password)
         log_event(
             {
                 "timestamp": utc_now(),
@@ -194,6 +271,7 @@ async def handle_telnet(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             command = await prompt(reader, writer, "mvx240$ ")
             if not command or command.lower() in {"exit", "quit", "logout"}:
                 break
+            log_input_capture(source_ip, source_port, "command", command)
             log_event(
                 {
                     "timestamp": utc_now(),

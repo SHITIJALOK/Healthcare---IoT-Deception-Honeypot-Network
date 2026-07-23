@@ -8,6 +8,7 @@ The project is intentionally safe by default:
 - Uses high ports instead of privileged production ports.
 - Simulates firewall blocking in a JSON state file instead of changing OS firewall rules.
 - Stores uploaded payloads in a sandbox directory and records SHA-256 hashes.
+- Automatically creates simulated block rules when a source exceeds the configured interaction threshold.
 
 ## Components
 
@@ -30,6 +31,13 @@ Use the installed Python interpreter on this machine:
 
 Open `dashboards/index.html` in a browser to view the generated dashboard.
 
+The dashboard includes:
+
+- attack origin map and service distribution
+- top attacker IPs and captured commands
+- internal alert counts
+- active block rules and rollback history
+
 ## Run the Honeypot
 
 ```powershell
@@ -48,6 +56,8 @@ Generate traffic from another terminal:
 Invoke-WebRequest http://127.0.0.1:8080/
 Invoke-WebRequest http://127.0.0.1:8080/admin?cmd=cat+/etc/passwd
 ```
+
+Repeated suspicious interactions from the same IP trigger an automatic simulated firewall block based on `config/device_profile.json`.
 
 ## Simulated Firewall Workflow
 

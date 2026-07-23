@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import html
 import ipaddress
-from collections import Counter, defaultdict
-from pathlib import Path
+from collections import Counter
 
-from common import DASHBOARD_DIR, LOG_DIR, ensure_dirs, iter_jsonl, utc_now, write_json
+from common import CONFIG_DIR, DASHBOARD_DIR, LOG_DIR, ensure_dirs, is_internal_ip, iter_jsonl, load_json, utc_now, write_json
 
 
 EVENT_LOG = LOG_DIR / "events.jsonl"
+ALERT_LOG = LOG_DIR / "alerts.jsonl"
 IOC_PATH = LOG_DIR / "iocs.json"
 DASHBOARD_PATH = DASHBOARD_DIR / "index.html"
+RULES_PATH = CONFIG_DIR / "firewall_rules.json"
+INTERNAL_RANGES = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"]
 
 
 TECHNIQUE_KEYWORDS = {
@@ -28,7 +30,7 @@ def classify_country(ip: str) -> tuple[str, str, float, float]:
         address = ipaddress.ip_address(ip)
     except ValueError:
         return ("Unknown", "Unknown", 0.0, 0.0)
-    if address.is_private:
+    if is_internal_ip(str(address), INTERNAL_RANGES):
         return ("Internal", "Hospital LAN", 0.0, 0.0)
     first = int(str(address).split(".")[0]) if address.version == 4 else int(address) % 255
     buckets = [
@@ -63,8 +65,12 @@ def analyze() -> dict:
     technique_counter: Counter[str] = Counter()
     payload_hashes: set[str] = set()
     by_country: Counter[str] = Counter()
+    alert_counter: Counter[str] = Counter()
     geo_points = []
     credentials = []
+    top_attackers = []
+    rules = load_json(RULES_PATH, {"active": [], "rolled_back": []})
+    alerts = list(iter_jsonl(ALERT_LOG))
 
     for event in events:
         source_ip = event.get("source_ip")
@@ -92,6 +98,13 @@ def analyze() -> dict:
             )
         for technique in detect_techniques(event):
             technique_counter[technique] += 1
+    for alert in alerts:
+        alert_counter[alert.get("severity", "unknown")] += 1
+
+    top_attackers = [
+        {"ip": ip, "events": count, "country": classify_country(ip)[0]}
+        for ip, count in ip_counter.most_common(10)
+    ]
 
     iocs = {
         "generated_at": utc_now(),
@@ -105,6 +118,15 @@ def analyze() -> dict:
         "event_types": dict(event_counter),
         "countries": dict(by_country),
         "geo_points": geo_points,
+        "top_attackers": top_attackers,
+        "alerts": {
+            "total": len(alerts),
+            "by_severity": dict(alert_counter),
+        },
+        "blocked_rules": {
+            "active": rules.get("active", []),
+            "rolled_back": rules.get("rolled_back", []),
+        },
     }
     write_json(IOC_PATH, iocs)
     DASHBOARD_PATH.write_text(render_dashboard(iocs), encoding="utf-8")
@@ -130,6 +152,18 @@ def render_dashboard(iocs: dict) -> str:
     commands = "\n".join(
         f"<li><code>{html.escape(cmd)}</code> <span>{count}</span></li>" for cmd, count in iocs["top_commands"]
     ) or "<li>No shell commands yet</li>"
+    attackers = "\n".join(
+        f"<li><strong>{html.escape(item['ip'])}</strong> <span>{item['events']} events, {html.escape(item['country'])}</span></li>"
+        for item in iocs["top_attackers"]
+    ) or "<li>No attackers ranked yet</li>"
+    active_rules = "\n".join(
+        f"<li><strong>{html.escape(rule['ip'])}</strong> <span>{html.escape(rule['reason'])}</span></li>"
+        for rule in iocs["blocked_rules"]["active"]
+    ) or "<li>No active block rules</li>"
+    rolled_back_rules = "\n".join(
+        f"<li><strong>{html.escape(rule['ip'])}</strong> <span>rolled back at {html.escape(rule.get('rolled_back_at', 'unknown'))}</span></li>"
+        for rule in iocs["blocked_rules"]["rolled_back"]
+    ) or "<li>No rollbacks yet</li>"
 
     points = []
     for point in iocs["geo_points"][:80]:
@@ -169,13 +203,20 @@ def render_dashboard(iocs: dict) -> str:
     <section><h2>Total Events</h2><div class="metric">{iocs['total_events']}</div></section>
     <section><h2>Attacker IPs</h2><div class="metric">{len(iocs['attacker_ips'])}</div></section>
     <section><h2>Payload Hashes</h2><div class="metric">{len(iocs['payload_hashes'])}</div></section>
+    <section><h2>Internal Alerts</h2><div class="metric">{iocs['alerts']['total']}</div></section>
+    <section><h2>Active Blocks</h2><div class="metric">{len(iocs['blocked_rules']['active'])}</div></section>
+    <section><h2>Rolled Back</h2><div class="metric">{len(iocs['blocked_rules']['rolled_back'])}</div></section>
     <section class="wide"><h2>Attack Origin Map</h2><svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M5,55 C20,30 35,35 45,48 S68,42 82,57 S95,66 98,45" fill="none" stroke="#94a3b8" stroke-width="10" opacity=".45"/>{''.join(points)}</svg></section>
     <section><h2>Techniques</h2>{bar_rows(iocs['techniques'])}</section>
     <section><h2>Services</h2>{bar_rows(iocs['services'])}</section>
     <section><h2>Countries</h2>{bar_rows(iocs['countries'])}</section>
+    <section><h2>Alert Severity</h2>{bar_rows(iocs['alerts']['by_severity'])}</section>
     <section><h2>Source IPs</h2><ul>{ips}</ul></section>
+    <section><h2>Top Attackers</h2><ul>{attackers}</ul></section>
     <section><h2>Commands</h2><ul>{commands}</ul></section>
     <section><h2>Uploaded Payload Hashes</h2><ul>{hashes}</ul></section>
+    <section><h2>Active Block Rules</h2><ul>{active_rules}</ul></section>
+    <section><h2>Rollback History</h2><ul>{rolled_back_rules}</ul></section>
   </main>
 </body>
 </html>"""

@@ -9,10 +9,12 @@ The honeypot simulates a vulnerable healthcare IoT device to detect reconnaissan
 1. `src/honeypot.py` loads `config/device_profile.json`.
 2. Three low-interaction services bind to localhost by default.
 3. Every connection, login attempt, command, upload, and probe is appended to `logs/events.jsonl`.
-4. Internal source IPs listed in RFC1918 networks also generate `logs/alerts.jsonl`.
-5. `src/analyze_logs.py` extracts IOCs and writes `logs/iocs.json`.
-6. The same analysis step renders `dashboards/index.html`.
-7. `src/firewall_rules.py` lets analysts simulate block rules and roll them back for false positives.
+4. Telnet input is captured as line-buffered keystroke transcript events for usernames, passwords, and commands.
+5. Internal source IPs listed in RFC1918 networks generate `logs/alerts.jsonl`.
+6. Repeated suspicious interactions can trigger an automatic simulated block rule based on the configured threshold.
+7. `src/analyze_logs.py` extracts IOCs and writes `logs/iocs.json`.
+8. The same analysis step renders `dashboards/index.html`.
+9. `src/firewall_rules.py` lets analysts simulate block rules and roll them back for false positives.
 
 ## Simulated Services
 
@@ -29,6 +31,7 @@ The honeypot simulates a vulnerable healthcare IoT device to detect reconnaissan
 - Uploaded data is stored only as sandbox files under `logs/uploads/`.
 - Firewall rules are simulated in `config/firewall_rules.json`; no OS firewall is modified.
 - The geolocation view is deterministic offline demo enrichment, not a live GeoIP lookup.
+- Automatic blocking remains simulated and auditable; it does not touch the host firewall.
 
 ## Production Hardening Notes
 
